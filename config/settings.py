@@ -43,9 +43,14 @@ INSTALLED_APPS = [
     'dj_rest_auth',
     'dj_rest_auth.registration',
     'environ',
+    
+    #apps,
+    'users',
 ]
 
 SITE_ID = 1
+
+AUTH_USER_MODEL = 'users.User'
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -161,3 +166,11 @@ JWT_AUTH = {
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
+KAKAO_REST_API_KEY = env.str('KAKAO_REST_API_KEY')
+KAKAO_CLIENT_SECRET = env.str('KAKAO_CLIENT_SECRET')
+KAKAO_REDIRECT_URI = env.str('KAKAO_REDIRECT_URI')
+KAKAO_ADMIN_KEY = env.str('KAKAO_ADMIN_KEY')
+
+GOOGLE_CLIENT_ID = env.str('GOOGLE_CLIENT_ID')
+GOOGLE_CLIENT_SECRET = env.str('GOOGLE_CLIENT_SECRET')
+GOOGLE_REDIRECT_URI = env.str('GOOGLE_REDIRECT_URI')
