@@ -2,11 +2,12 @@
 import requests
 import logging
 from django.conf import settings
-from django.http import HttpResponse
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
 from drf_spectacular.utils import extend_schema, OpenApiExample
 
 from .models import User, SocialAccount
@@ -14,20 +15,18 @@ from .serializers import (
     SocialLoginRequestSerializer,
     SocialLoginResponseSerializer,
     UserSerializer,
+    UserUpdateSerializer,
+    LogoutRequestSerializer,
+    WithdrawalRequestSerializer,
+    MessageResponseSerializer
 )
 
-#! 추후에 Flutter 진행 시 삭제해야 할 코드 (callback은 front에서 진행하는 것)
-def callback_view(request):
-    code = request.GET.get("code")
-    error = request.GET.get("error")
-    
-    if error:
-        return HttpResponse(f"kakao Login Error: {error}")
-    
-    return HttpResponse(f"kakao Authorization code: {code}")
+logger = logging.getLogger(__name__)
 
 
 class KakaoLoginAPIView(APIView):
+    permission_classes = [AllowAny]
+    
     @extend_schema(
         tags=["Auth - KakaoSocial"],
         summary="카카오 소셜 로그인",
@@ -38,7 +37,7 @@ class KakaoLoginAPIView(APIView):
         request=SocialLoginRequestSerializer,
         responses={
             200: SocialLoginResponseSerializer,
-            400: {"type": "object", "properties": {"detail": {"type": "string"}}},
+            400: MessageResponseSerializer,
         },
         examples=[
             OpenApiExample(
@@ -60,29 +59,22 @@ class KakaoLoginAPIView(APIView):
         ],
     )
     def post(self, request, *args, **kwargs):
-        logger = logging.getLogger(__name__)
-        # 1) 요청 검증
         serializer = SocialLoginRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         code = serializer.validated_data["code"]
         
-        # 2) 카카오 토큰/프로필 요청 
-        kakao_rest_api_key = settings.KAKAO_REST_API_KEY
-        kakao_client_secret = settings.KAKAO_CLIENT_SECRET
-        kakao_redirect_uri = settings.KAKAO_REDIRECT_URI
         token_res = requests.post(
             "https://kauth.kakao.com/oauth/token",
             data={
                 "grant_type": "authorization_code",
-                "client_id": kakao_rest_api_key,
-                "client_secret": kakao_client_secret,
-                "redirect_uri": kakao_redirect_uri,
+                "client_id": settings.kakao_rest_api_key,
+                "client_secret": settings.kakao_client_secret,
+                "redirect_uri": settings.kakao_redirect_uri,
                 "code": code,
             },
         )
         
-        logger.error("Kakao token response status: %s", token_res.status_code)
-        logger.error("Kakao token response body: %s", token_res.text)
+        logger.info("Kakao token response status: %s", token_res.status_code)
 
         if token_res.status_code != 200:
             return Response(
@@ -109,10 +101,10 @@ class KakaoLoginAPIView(APIView):
         kakao_account = profile_json.get("kakao_account", {})
 
         email = kakao_account.get("email")
-        nickname = properties.get("nickname") or email
+        nickname = properties.get("nickname") or email.split("@")[0] if email else "사용자"
         profile_image = properties.get("profile_image", "")
 
-        # 3) SocialAccount & User 연결
+        # SocialAccount & User 연결
         try:
             social = SocialAccount.objects.get(
                 provider=SocialAccount.Provider.KAKAO,
@@ -124,7 +116,7 @@ class KakaoLoginAPIView(APIView):
             user, created = User.objects.get_or_create(
                 email=email,
                 defaults={
-                    "username": nickname,
+                    "nickname": nickname,
                     "profile_image": profile_image,
                 },
             )
@@ -134,7 +126,6 @@ class KakaoLoginAPIView(APIView):
                 provider_user_id=kakao_oid,
             )
 
-        # 4) JWT 발급
         refresh = RefreshToken.for_user(user)
 
         response_data = {
@@ -149,6 +140,8 @@ class KakaoLoginAPIView(APIView):
     
     
 class GoogleLoginAPIView(APIView):
+    permission_classes = [AllowAny]
+    
     @extend_schema(
         tags=["Auth - GoogleSocial"],
         summary="구글 소셜 로그인",
@@ -159,53 +152,27 @@ class GoogleLoginAPIView(APIView):
         request=SocialLoginRequestSerializer,
         responses={
             200: SocialLoginResponseSerializer,
-            400: {"type": "object", "properties": {"detail": {"type": "string"}}},
+            400: MessageResponseSerializer,
         },
-        examples=[
-            OpenApiExample(
-                "성공 예시",
-                value={
-                    "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6...",
-                    "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6...",
-                    "user": {
-                        "id": 1,
-                        "email": "test@example.com",
-                        "username": "심슬냥",
-                        "profile_image": "https://...",
-                        "created_at": "2025-11-17T12:34:56Z",
-                    },
-                    "is_created": True,
-                },
-                response_only=True,
-            )
-        ],
     )
+    
     def post(self, request, *args, **kwargs):
-        logger = logging.getLogger(__name__)
-        
-        # 1) 요청 검증
         serializer = SocialLoginRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         code = serializer.validated_data["code"]
-        
-        # 2) 구글 토큰/프로필 요청
-        google_client_id = settings.GOOGLE_CLIENT_ID
-        google_client_secret = settings.GOOGLE_CLIENT_SECRET
-        google_redirect_uri = settings.GOOGLE_REDIRECT_URI
         
         token_res = requests.post(
             "https://oauth2.googleapis.com/token",
             data={
                 "grant_type": "authorization_code",
-                "client_id": google_client_id,
-                "client_secret": google_client_secret,
-                "redirect_uri": google_redirect_uri,
+                "client_id": settings.google_client_id,
+                "client_secret": settings.google_client_secret,
+                "redirect_uri": settings.google_redirect_uri,
                 "code": code
             },
         )
         
-        logger.error("Google token response status: %s", token_res.status_code)
-        logger.error("Google token response body: %s", token_res.text)
+        logger.info("Google token response status: %s", token_res.status_code)
         
         if token_res.status_code != 200:
             return Response(
@@ -222,7 +189,6 @@ class GoogleLoginAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # 3) access_token으로 구글 userinfo 조회
         headers = {"Authorization": f"Bearer {access_token}"}
         profile_res = requests.get(
             "https://openidconnect.googleapis.com/v1/userinfo",
@@ -237,10 +203,9 @@ class GoogleLoginAPIView(APIView):
             
         profile_json = profile_res.json()
         
-        # 구글의 고유 사용자 ID (sub)
         google_oid = profile_json.get("sub")
         email = profile_json.get("email")
-        name = profile_json.get("name") or email
+        name = profile_json.get("name") or email.split("@")[0] if email else "사용자"
         picture = profile_json.get("picture", "")
 
         if not google_oid or not email:
@@ -249,7 +214,6 @@ class GoogleLoginAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         
-        # 4) SocialAccount & User 연결 (이메일 같으면 같은 계정으로 묶는 핵심 로직)
         try:
             social = SocialAccount.objects.get(
                 provider=SocialAccount.Provider.GOOGLE,
@@ -287,3 +251,222 @@ class GoogleLoginAPIView(APIView):
         
         output_serializer = SocialLoginResponseSerializer(response_data)
         return Response(output_serializer.data, status=status.HTTP_200_OK)
+    
+    
+class LogoutAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    @extend_schema(
+        tags=["Auth - Logout"],
+        summary="로그아웃",
+        description="사용자 로그아웃 처리 및 Refresh Token 블랙리스트 등록",
+        request=LogoutRequestSerializer,
+        responses={
+            200: MessageResponseSerializer,
+            400: MessageResponseSerializer,
+        },
+        examples=[
+            OpenApiExample(
+                "성공 예시",
+                value={
+                    "message": "로그아웃 되었습니다."
+                },
+                response_only=True,
+            )
+        ],
+    )
+    def post(self, request):
+        serializer = LogoutRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        try:
+            refresh_token = serializer.validated_data["refresh"]
+            token = RefreshToken(refresh_token)
+            token.blacklist()
+            
+            return Response(
+                {"message": "로그아웃 되었습니다."},
+                status=status.HTTP_200_OK,
+            )
+        except Exception as e:
+            logger.error("Error blacklisting token: %s", str(e))
+            return Response(
+                {"detail": "로그아웃 처리 중 오류가 발생했습니다."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+
+class WithdrawalAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    @extend_schema(
+        tags=["Auth - Withdrawal"],
+        summary="회원 탈퇴",
+        description=(
+            "사용자 회원 탈퇴 처리\n"
+            "1. 연결된 소셜 계정의 연결을 해제 (카카오/구글 API 호출)\n"
+            "2. 모든 토큰 무효화 처리\n"
+            "3. 사용자 계정 삭제\n\n"
+            "※주의 : 탈퇴 시 복구가 불가능합니다."),
+        request=WithdrawalRequestSerializer,
+        responses={
+            200: MessageResponseSerializer,
+            400: MessageResponseSerializer,
+        },
+    )
+    
+    def delete(self, request):
+        user = request.user
+        serializer = WithdrawalRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        refresh_token = serializer.validated_data.get("refresh")
+        
+        try:
+            social_accounts = SocialAccount.objects.filter(user=user)
+            
+            for social in social_accounts:
+                self._unlink_social_account(social)
+                
+            if refresh_token:
+                try:
+                    token = RefreshToken(refresh_token)
+                    token.blacklist()
+                except Exception as e:
+                    pass
+            
+            outstanding_tokens = OutstandingToken.objects.filter(user=user)
+            for o_token in outstanding_tokens:
+                try:
+                    BlacklistedToken.objects.get_or_create(token=o_token)
+                except Exception as e:
+                    pass
+                
+            user.delete()
+            
+            return Response(
+                {"message": "회원 탈퇴가 완료되었습니다. 이용해 주셔서 감사합니다."},
+                status=status.HTTP_200_OK,
+            )
+            
+        except Exception as e:
+            logger.error(f"Error during user {user.id} withdrawal: {str(e)}")
+            return Response(
+                {"message": "회원 탈퇴 처리 중 오류가 발생했습니다."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+    
+    def _unlink_social_account(self, social: SocialAccount):
+        try:
+            if social.provider == SocialAccount.Providers.KAKAO:
+                self._unlink_kakao(social)
+            elif social.provider == SocialAccount.Providers.GOOGLE:
+                self._unlink_google(social)
+        except Exception as e:
+            logger.error(f"Error unlinking social account {social.provider}: {str(e)}")
+        finally:
+            social.delete()
+            
+    def _unlink_kakao(self, social: SocialAccount):
+        admin_key = getattr(settings, "KAKAO_ADMIN_KEY", None)
+        
+        if admin_key:
+            requests.post(
+                "https://kapi.kakao.com/v1/user/unlink",
+                headers={
+                    "Authorization": f"KakaoAK {admin_key}"
+                },
+                data={
+                    "target_id_type": "user_id",
+                    "target_id": social.provider_user_id,
+                }
+            )
+            logger.info(f"Kakao account unlinked for user {social.provider_user_id}")
+            
+            
+    def _unlink_google(self, social: SocialAccount):
+        logger.info(f"Google account unlinking not implemented for user {social.provider_user_id}")
+        
+
+class UserProfileAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    @extend_schema(
+        tags=["User - Profile"],
+        summary="내 프로필 조회",
+        description="인증된 사용자의 프로필 정보를 조회합니다.",
+        responses={
+            200: UserSerializer,
+            400: MessageResponseSerializer,
+        },
+    )
+    
+    def get(self, request):
+        serializer = UserSerializer(request.user)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+    @extend_schema(
+        tags=["User - Profile"],
+        summary="내 프로필 수정",
+        description="인증된 사용자의 프로필 정보를 수정합니다.",
+        request=UserUpdateSerializer,
+        responses={
+            200: UserSerializer,
+            400: MessageResponseSerializer,
+        },
+    )
+    def patch(self, request):
+        serializer = UserUpdateSerializer(request.user, data=request.data, partial=True)
+        
+        if serializer.is_valid():
+            serializer.save()
+            return Response(
+                UserSerializer(request.user).data,
+                status=status.HTTP_200_OK,
+            )
+        
+        return Response(
+            {"message": "프로필 수정에 실패했습니다.", "errors": serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class SocialAccountsAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    @extend_schema(
+        tags=["Auth"],
+        summary="연결된 소셜 계정 조회",
+        description="현재 사용자에게 연결된 소셜 계정 목록을 조회합니다.",
+        responses={
+            200: {
+                "type": "object",
+                "properties": {
+                    "social_accounts": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "provider": {"type": "string"},
+                                "connected_at": {"type": "string", "format": "date-time"}
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    )
+    def get(self, request):
+        social_accounts = SocialAccount.objects.filter(user=request.user)
+        
+        data = {
+            "social_accounts": [
+                {
+                    "provider": sa.provider,
+                    "provider_user_id": sa.provider_user_id[-4:].rjust(len(sa.provider_user_id), '*'),  # 마스킹
+                }
+                for sa in social_accounts
+            ]
+        }
+        
+        return Response(data, status=status.HTTP_200_OK)
