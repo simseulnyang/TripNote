@@ -19,9 +19,15 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = []
+    
+    
+    class Meta:
+        verbose_name = "사용자"
+        verbose_name_plural = "사용자 목록"
+        ordering = ['-created_at']
 
     def __str__(self):
-        return self.email
+        return f"{self.nickname} ({self.email})"
     
     def has_perm(self, perm, obj = ...):
         return super().has_perm(perm, obj)
