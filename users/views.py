@@ -246,7 +246,7 @@ class GoogleLoginAPIView(APIView):
             if user is None:
                 user = User.objects.create(
                     email=email,
-                    username=name,
+                    nickname=name,
                     profile_image=picture,
                 )
                 created = True
