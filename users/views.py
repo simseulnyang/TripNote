@@ -10,8 +10,8 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
 from drf_spectacular.utils import extend_schema, OpenApiExample
 
-from .models import User, SocialAccount
-from .serializers import (
+from users.models import User, SocialAccount
+from users.serializers import (
     SocialLoginRequestSerializer,
     SocialLoginResponseSerializer,
     UserSerializer,
@@ -31,8 +31,9 @@ class KakaoLoginAPIView(APIView):
         tags=["Auth - KakaoSocial"],
         summary="카카오 소셜 로그인",
         description=(
-            "카카오 인가 코드를 이용하여 우리 서비스용 JWT 토큰을 발급합니다.\n"
-            "프론트에서 카카오 로그인 후 받은 `code`를 전송하세요."
+            "카카오 로그인을 처리합니다.\n\n"
+            "1. 인가 코드 방식 = 'code' 전송.\n"
+            "2. 엑세스 토큰 방식 = 'access_token' 전송 (모바일 SDK 사용 시)"
         ),
         request=SocialLoginRequestSerializer,
         responses={
@@ -59,31 +60,47 @@ class KakaoLoginAPIView(APIView):
         ],
     )
     def post(self, request, *args, **kwargs):
-        serializer = SocialLoginRequestSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        code = serializer.validated_data["code"]
+        code = request.data.get("code")
+        access_token = request.data.get("access_token")
         
+        if access_token:
+            return self._login_with_access_token(access_token)
+        
+        if code:
+            return self._login_with_code(code)
+        
+        return Response(
+            {"messsage": "code 또는 access_token을 제공해야 합니다."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    
+    def _login_with_code(self, code):
+        """카카오 인가 코드로 로그인 처리"""
         token_res = requests.post(
             "https://kauth.kakao.com/oauth/token",
             data={
                 "grant_type": "authorization_code",
-                "client_id": settings.kakao_rest_api_key,
-                "client_secret": settings.kakao_client_secret,
-                "redirect_uri": settings.kakao_redirect_uri,
+                "client_id": settings.KAKAO_REST_API_KEY,
+                "client_secret": settings.KAKAO_CLIENT_SECRET,
+                "redirect_uri": settings.KAKAO_REDIRECT_URI,
                 "code": code,
             },
         )
         
-        logger.info("Kakao token response status: %s", token_res.status_code)
+        logger.info(f"Kakao token response status: {token_res.status_code}")
 
         if token_res.status_code != 200:
             return Response(
-                {"detail": "Failed to obtain access token from Kakao"},
+                {"message": "Failed to obtain access token from Kakao"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         access_token = token_res.json().get("access_token")
-
+        return self._login_with_access_token(access_token)
+    
+    
+    def _login_with_access_token(self, access_token):
+        """카카오 엑세스 토큰으로 로그인 처리"""
         headers = {"Authorization": f"Bearer {access_token}"}
         profile_res = requests.get(
             "https://kapi.kakao.com/v2/user/me", headers=headers
@@ -107,12 +124,15 @@ class KakaoLoginAPIView(APIView):
         # SocialAccount & User 연결
         try:
             social = SocialAccount.objects.get(
-                provider=SocialAccount.Provider.KAKAO,
+                provider=SocialAccount.Providers.KAKAO,
                 provider_user_id=kakao_oid,
             )
             user = social.user
             created = False
         except SocialAccount.DoesNotExist:
+            if not email:
+                email = f"kakao_{kakao_oid}@tripnote.local"
+                
             user, created = User.objects.get_or_create(
                 email=email,
                 defaults={
@@ -122,7 +142,7 @@ class KakaoLoginAPIView(APIView):
             )
             SocialAccount.objects.create(
                 user=user,
-                provider=SocialAccount.Provider.KAKAO,
+                provider=SocialAccount.Providers.KAKAO,
                 provider_user_id=kakao_oid,
             )
 
@@ -135,8 +155,7 @@ class KakaoLoginAPIView(APIView):
             "is_created": created,
         }
 
-        output_serializer = SocialLoginResponseSerializer(response_data)
-        return Response(output_serializer.data, status=status.HTTP_200_OK)
+        return Response(response_data, status=status.HTTP_200_OK)
     
     
 class GoogleLoginAPIView(APIView):
@@ -165,14 +184,14 @@ class GoogleLoginAPIView(APIView):
             "https://oauth2.googleapis.com/token",
             data={
                 "grant_type": "authorization_code",
-                "client_id": settings.google_client_id,
-                "client_secret": settings.google_client_secret,
-                "redirect_uri": settings.google_redirect_uri,
+                "client_id": settings.GOOGLE_CLIENT_ID,
+                "client_secret": settings.GOOGLE_CLIENT_SECRET,
+                "redirect_uri": settings.GOOGLE_REDIRECT_URI,
                 "code": code
             },
         )
         
-        logger.info("Google token response status: %s", token_res.status_code)
+        logger.info(f"Google token response status: {token_res.status_code}")
         
         if token_res.status_code != 200:
             return Response(
@@ -210,13 +229,13 @@ class GoogleLoginAPIView(APIView):
 
         if not google_oid or not email:
             return Response(
-                {"detail": "Google user info does not contain required fields"},
+                {"message": "Google user info does not contain required fields"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         
         try:
             social = SocialAccount.objects.get(
-                provider=SocialAccount.Provider.GOOGLE,
+                provider=SocialAccount.Providers.GOOGLE,
                 provider_user_id=google_oid,
             )
             user = social.user
@@ -227,7 +246,7 @@ class GoogleLoginAPIView(APIView):
             if user is None:
                 user = User.objects.create(
                     email=email,
-                    username=name,
+                    nickname=name,
                     profile_image=picture,
                 )
                 created = True
@@ -236,7 +255,7 @@ class GoogleLoginAPIView(APIView):
                 
             SocialAccount.objects.create(
                 user=user,
-                provider=SocialAccount.Provider.GOOGLE,
+                provider=SocialAccount.Providers.GOOGLE,
                 provider_user_id=google_oid,
             )
         
@@ -249,8 +268,7 @@ class GoogleLoginAPIView(APIView):
             "is_created": created,
         }
         
-        output_serializer = SocialLoginResponseSerializer(response_data)
-        return Response(output_serializer.data, status=status.HTTP_200_OK)
+        return Response(response_data, status=status.HTTP_200_OK)
     
     
 class LogoutAPIView(APIView):
@@ -259,7 +277,8 @@ class LogoutAPIView(APIView):
     @extend_schema(
         tags=["Auth - Logout"],
         summary="로그아웃",
-        description="사용자 로그아웃 처리 및 Refresh Token 블랙리스트 등록",
+        description=("Refresh 토큰을 블랙리스트에 추가하여 로그아웃 처리합니다.\n"
+                     "클라이언트에서eh 저장된 토큰을 삭제해야 합니다."),
         request=LogoutRequestSerializer,
         responses={
             200: MessageResponseSerializer,
