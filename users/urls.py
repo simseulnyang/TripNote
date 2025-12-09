@@ -6,7 +6,7 @@ urlpatterns = [
     path('kakao/login/', KakaoLoginAPIView.as_view(), name='kakao-login'),
     path('google/login/', GoogleLoginAPIView.as_view(), name='google-login'),
     
-    path('token/refresh', TokenRefreshView.as_view(), name='token-refresh'),
+    path('token/refresh/', TokenRefreshView.as_view(), name='token-refresh'),
     path('logout/', LogoutAPIView.as_view(), name='logout'),
     
     path('profile/', UserProfileAPIView.as_view(), name='user-profile'),
