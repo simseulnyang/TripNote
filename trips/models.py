@@ -29,6 +29,7 @@ class Trip(models.Model):
     thumbnail = models.URLField(
         max_length=500,
         blank=True,
+        null=True,
         verbose_name="썸네일 이미지"
     )
     is_public = models.BooleanField(

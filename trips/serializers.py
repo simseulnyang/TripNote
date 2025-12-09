@@ -369,6 +369,7 @@ class TripDetailSerializer(serializers.ModelSerializer):
 class TripCreateSerializer(serializers.ModelSerializer):
     destinations = DestinationCreateSerializer(many=True, required=False)
     budgets = BudgetCreateSerializer(many=True, required=False)
+    thumbnail = serializers.CharField(required=False, allow_null=True, allow_blank=True)
     
     class Meta:
         model = Trip
