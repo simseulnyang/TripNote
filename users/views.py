@@ -295,11 +295,11 @@ class LogoutAPIView(APIView):
         ],
     )
     def post(self, request):
-        serializer = LogoutRequestSerializer(data=request.data)
+        serializer = LogoutRequestSerializer(data=request.data)        
         serializer.is_valid(raise_exception=True)
         
         try:
-            refresh_token = serializer.validated_data["refresh"]
+            refresh_token = serializer.validated_data["refresh_token"]
             token = RefreshToken(refresh_token)
             token.blacklist()
             
