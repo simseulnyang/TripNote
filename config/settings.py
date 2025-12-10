@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     #apps,
     'users',
     'trips',
+    'ai_chat',
 ]
 
 SITE_ID = 1
@@ -185,3 +186,5 @@ KAKAO_ADMIN_KEY = env.str('KAKAO_ADMIN_KEY')
 GOOGLE_CLIENT_ID = env.str('GOOGLE_CLIENT_ID')
 GOOGLE_CLIENT_SECRET = env.str('GOOGLE_CLIENT_SECRET')
 GOOGLE_REDIRECT_URI = env.str('GOOGLE_REDIRECT_URI')
+
+GEMINI_API_KEY = env.str('GEMINI_API_KEY')

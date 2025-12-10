@@ -7,6 +7,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/users/', include("users.urls")),
     path('api/trips/', include("trips.urls")),
+    path('api/chat/', include("ai_chat.urls")),
     
     # OpenAPI 스키마(JSON)
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
