@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     #apps,
     'users',
     'trips',
+    'ai_chat',
 ]
 
 SITE_ID = 1
