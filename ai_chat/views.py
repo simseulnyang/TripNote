@@ -4,6 +4,7 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from drf_spectacular.utils import extend_schema, OpenApiResponse
 
 from .models import ChatSession, ChatMessage
 from .serializers import (
@@ -55,14 +56,31 @@ class ChatSessionListView(APIView):
     """채팅 세션 목록 조회 / 생성"""
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        tags=['AI Chat_list_GET'],
+        summary='채팅 세션 목록 조회',
+        description='현재 로그인한 사용자의 모든 채팅 세션 목록을 조회합니다.',
+        responses={
+            200: ChatSessionListSerializer(many=True),
+            401: OpenApiResponse(description='인증 실패'),
+        }
+    )
     def get(self, request):
-        """세션 목록 조회"""
         sessions = ChatSession.objects.filter(user=request.user)
         serializer = ChatSessionListSerializer(sessions, many=True)
         return Response(serializer.data)
 
+    @extend_schema(
+        tags=['AI Chat_list_POST'],
+        summary='새 채팅 세션 생성',
+        description='새로운 채팅 세션을 생성합니다.',
+        request={'application/json': {'type': 'object', 'properties': {'title': {'type': 'string', 'example': '제주도 여행'}}}},
+        responses={
+            201: ChatSessionSerializer,
+            401: OpenApiResponse(description='인증 실패'),
+        }
+    )
     def post(self, request):
-        """새 세션 생성"""
         session = ChatSession.objects.create(
             user=request.user,
             title=request.data.get('title', '새 대화')
@@ -75,8 +93,17 @@ class ChatSessionDetailView(APIView):
     """채팅 세션 상세 조회 / 삭제"""
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        tags=['AI Chat_detail_GET'],
+        summary='채팅 세션 상세 조회',
+        description='특정 채팅 세션의 상세 정보와 메시지 목록을 조회합니다.',
+        responses={
+            200: ChatSessionSerializer,
+            401: OpenApiResponse(description='인증 실패'),
+            404: OpenApiResponse(description='세션을 찾을 수 없음'),
+        }
+    )
     def get(self, request, session_id):
-        """세션 상세 조회 (메시지 포함)"""
         try:
             session = ChatSession.objects.get(id=session_id, user=request.user)
         except ChatSession.DoesNotExist:
@@ -85,8 +112,17 @@ class ChatSessionDetailView(APIView):
         serializer = ChatSessionSerializer(session)
         return Response(serializer.data)
 
+    @extend_schema(
+        tags=['AI Chat_detail_DELETE'],
+        summary='채팅 세션 삭제',
+        description='특정 채팅 세션과 관련된 모든 메시지를 삭제합니다.',
+        responses={
+            204: OpenApiResponse(description='삭제 성공'),
+            401: OpenApiResponse(description='인증 실패'),
+            404: OpenApiResponse(description='세션을 찾을 수 없음'),
+        }
+    )
     def delete(self, request, session_id):
-        """세션 삭제"""
         try:
             session = ChatSession.objects.get(id=session_id, user=request.user)
         except ChatSession.DoesNotExist:
@@ -100,6 +136,31 @@ class ChatMessageView(APIView):
     """AI 채팅 메시지 전송"""
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        tags=['AI Chat_send_POST'],
+        summary='AI에게 메시지 전송',
+        description='AI 여행 플래너에게 메시지를 보내고 응답을 받습니다. session_id가 없으면 새 세션이 자동 생성됩니다.',
+        request=ChatRequestSerializer,
+        responses={
+            200: {
+                'type': 'object',
+                'properties': {
+                    'session_id': {'type': 'integer', 'example': 1},
+                    'message': {
+                        'type': 'object',
+                        'properties': {
+                            'id': {'type': 'integer', 'example': 1},
+                            'role': {'type': 'string', 'example': 'assistant'},
+                            'content': {'type': 'string', 'example': '📅 강릉 2박 3일 여행 일정...'},
+                            'created_at': {'type': 'string', 'example': '2025-12-10T10:00:00Z'},
+                        }
+                    }
+                }
+            },
+            401: OpenApiResponse(description='인증 실패'),
+            404: OpenApiResponse(description='세션을 찾을 수 없음'),
+        }
+    )
     def post(self, request):
         serializer = ChatRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
