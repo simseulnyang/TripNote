@@ -48,6 +48,18 @@ class TripViewSet(viewsets.ModelViewSet):
     """여행 일정 CRUD API"""
     permission_classes = [IsAuthenticated, IsOwnerOrReadOnly]
     
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        
+        trip = serializer.instance
+        response_serializer = TripDetailSerializer(trip)
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+    
     def get_queryset(self):
         return Trip.objects.filter(user=self.request.user).prefetch_related(
             "destinations", "day_plans", "budgets", "expenses", "logs"
